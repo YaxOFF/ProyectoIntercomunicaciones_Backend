@@ -18,7 +18,7 @@ Solo **mock data** (semillas). Dos repos:
 | Tema | Decisión |
 |---|---|
 | Backend | Una solución `ProyectoIntercomunicaciones.sln` con **2 APIs**: `Banco.Api` (puerto 5001) y `Tienda.Api` (puerto 5002). Controllers + Services, .NET 10, EF Core. |
-| Bases de datos | **PostgreSQL en Docker**, 2 contenedores: `banco-db` (host 5433, BD `banco`) y `tienda-db` (host 5434, BD `tienda`). Migraciones EF + semilla automática al arrancar. |
+| Bases de datos | **PostgreSQL en Docker**, 2 contenedores: `banco-db` (host 5471, BD `banco`) y `tienda-db` (host 5472, BD `tienda`). Migraciones EF + semilla automática al arrancar. |
 | Mock data | Usuarios demo con saldo $10,000; cuentas nuevas también nacen con $10,000. Catálogo de tienda sembrado con precios múltiplos de $20. |
 | Auth | Banco: registro/login con contraseña hasheada (PBKDF2 de `PasswordHasher`) y **JWT**. La tienda no tiene cuentas: el pedido guarda el email del comprador. |
 | Seguridad (las 3) | Ver sección **Diseño de seguridad**: firma digital RSA de bonos, pago cifrado híbrido RSA-OAEP + AES-GCM, AES para wallet en el celular y dato sensible en BD. |
@@ -89,10 +89,10 @@ Una fase por sesión. Cada fase deja todo funcionando. Fases 1-5 en `Backend`, 6
 ### Fase 0 — Planear ✅
 Clonar los dos repos vacíos, este `PLAN.md`, `CLAUDE.md` en ambos repos y en la carpeta padre.
 
-### Fase 1 — Solución, Docker y BDs con semilla (Backend)
+### Fase 1 — Solución, Docker y BDs con semilla (Backend) ✅
 Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - `ProyectoIntercomunicaciones.sln`, `Banco.Api/`, `Tienda.Api/` (`dotnet new webapi --use-controllers`), `.gitignore` (.NET + `keys/`), `.env.example`.
-- `docker-compose.yml` con `banco-db` y `tienda-db` (postgres:17, volúmenes, puertos 5433/5434).
+- `docker-compose.yml` con `banco-db` y `tienda-db` (postgres:17, volúmenes, puertos 5471/5472).
 - EF Core + Npgsql en ambas: `BancoDbContext`, `TiendaDbContext`, entidades del modelo, migración inicial, `Database.Migrate()` + semilla al arrancar (2 usuarios demo con $10,000; ~10 productos).
 - `GET /productos` en tienda; `GET /health` en ambas.
 - Verificar: `docker compose up -d banco-db tienda-db`, `dotnet run` en cada API, `curl` a `/productos` y `/health`.
@@ -150,7 +150,7 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 ## Avance
 
 - [x] Fase 0 — Planear
-- [ ] Fase 1 — Solución, Docker y BDs con semilla
+- [x] Fase 1 — Solución, Docker y BDs con semilla
 - [ ] Fase 2 — Banco: cuentas, JWT y AES en BD
 - [ ] Fase 3 — Banco: bonos firmados y canje
 - [ ] Fase 4 — Tienda: pago cifrado híbrido y compra
@@ -163,3 +163,4 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 ## Bitácora
 
 - **2026-11-03 · Fase 0** — Repos clonados (vacíos). Decidido: 2 APIs en 1 solución, Postgres en Docker (2 contenedores), las 3 técnicas de seguridad combinadas, app en emulador Android. Plan maestro aquí; Frontend apunta a este archivo. Toolchain: .NET 10.0.401, Docker 29.8, Flutter en `C:\dev\flutter`.
+- **2026-11-03 · Fase 1** — Solución `.sln` con `Banco.Api` (:5001) y `Tienda.Api` (:5002), EF Core 10 + Npgsql, migración `Inicial` en `Data/Migrations` de cada API, `Migrate()` + semilla al arrancar. Usuarios demo `ana@demo.com` / `luis@demo.com`, contraseña `demo123`, $10,000 + movimiento DEPOSITO_INICIAL; 10 productos (CHECK en BD: precio múltiplo de 20). `GET /health` (prueba conexión a BD), `GET /productos`, `GET /productos/{id}`. **Puertos de BD cambiados a 5471/5472** (5433/5434 ya ocupados por otros proyectos en esta máquina); compose con `name: intercom`. Verificado con curl. Pendiente Fase 2: `ClabeCifrada` es nullable, los usuarios semilla aún no tienen CLABE.

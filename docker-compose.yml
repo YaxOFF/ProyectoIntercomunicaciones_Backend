@@ -1,0 +1,28 @@
+name: intercom
+
+services:
+  banco-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: banco
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:5471:5432"
+    volumes:
+      - banco-data:/var/lib/postgresql/data
+
+  tienda-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: tienda
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:5472:5432"
+    volumes:
+      - tienda-data:/var/lib/postgresql/data
+
+volumes:
+  banco-data:
+  tienda-data:
