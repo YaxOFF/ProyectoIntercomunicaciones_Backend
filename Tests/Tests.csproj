@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Banco.Api\Banco.Api.csproj" />
+    <ProjectReference Include="..\Tienda.Api\Tienda.Api.csproj" Aliases="tienda" />
   </ItemGroup>
 
 </Project>

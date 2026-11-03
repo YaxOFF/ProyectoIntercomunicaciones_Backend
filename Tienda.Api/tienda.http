@@ -1,0 +1,17 @@
+@tienda = http://localhost:5002
+
+### Catálogo
+GET {{tienda}}/productos
+
+### Llave pública de cifrado (PEM) — la app cifra el pago con ella
+GET {{tienda}}/llave-publica
+
+### Compra: el body es un paquete híbrido (RSA-OAEP + AES-GCM), no se arma a mano.
+# Ver Tests/ComprasTests.cs (Cifrar) para el cliente de referencia. Paquete basura -> 400:
+POST {{tienda}}/compras
+Content-Type: application/json
+
+{ "llaveCifrada": "AAAA", "nonce": "AAAAAAAAAAAAAAAA", "datos": "AAAAAAAAAAAAAAAAAAAAAA==" }
+
+### Historial
+GET {{tienda}}/pedidos?email=ana@demo.com

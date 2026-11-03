@@ -19,7 +19,9 @@ public class BonosTests(BonosTests.BancoFactory factory) : IClassFixture<BonosTe
                 .UseSetting("Seguridad:KeysDir", Path.Combine(Path.GetTempPath(), "banco-tests-keys"));
     }
 
-    private async Task<HttpClient> ClienteConSesion()
+    private Task<HttpClient> ClienteConSesion() => ClienteConSesion(factory);
+
+    internal static async Task<HttpClient> ClienteConSesion(BancoFactory factory)
     {
         var c = factory.CreateClient();
         var email = $"test{Guid.NewGuid():N}@demo.com";
@@ -29,7 +31,7 @@ public class BonosTests(BonosTests.BancoFactory factory) : IClassFixture<BonosTe
         return c;
     }
 
-    private static async Task<List<BonoFirmadoDto>> Comprar(HttpClient c, object pedido)
+    internal static async Task<List<BonoFirmadoDto>> Comprar(HttpClient c, object pedido)
     {
         var r = await c.PostAsJsonAsync("/bonos/comprar", pedido);
         r.EnsureSuccessStatusCode();
