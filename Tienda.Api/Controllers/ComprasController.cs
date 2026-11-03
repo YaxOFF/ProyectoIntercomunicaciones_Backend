@@ -50,8 +50,8 @@ public class ComprasController(TiendaDbContext db, DescifradoHibrido cifrado, Ba
             if (bonos.FirstOrDefault(b => !BancoCliente.Verificar(llaveBanco, b)) is { } falso)
                 return BadRequest(new { error = $"Firma inválida en el bono {falso.Serie}" });
             var suma = bonos.Sum(b => b.Denominacion);
-            if (suma != total)
-                return BadRequest(new { error = $"Los bonos suman ${suma} y el total es ${total}: el pago debe ser exacto" });
+            if (suma < total)
+                return BadRequest(new { error = $"Los bonos suman ${suma} y el total es ${total}: no alcanza" });
 
             await using var tx = await db.Database.BeginTransactionAsync();
             foreach (var (id, cantidad) in items)
@@ -62,7 +62,7 @@ public class ComprasController(TiendaDbContext db, DescifradoHibrido cifrado, Ba
             }
 
             // ponytail: si el banco canjea pero el commit local falla, los bonos se pierden; añadir reintento/compensación si importa.
-            var (status, _) = await banco.Canjear(bonos.Select(b => b.Serie));
+            var (status, canje) = await banco.Canjear(bonos.Select(b => b.Serie), (int)total);
             if (status == HttpStatusCode.Conflict)
                 return Conflict(new { error = "Algún bono ya fue gastado; no se cobró nada" });
             if (status != HttpStatusCode.OK)
@@ -76,7 +76,7 @@ public class ComprasController(TiendaDbContext db, DescifradoHibrido cifrado, Ba
             db.Pedidos.Add(pedido);
             await db.SaveChangesAsync();
             await tx.CommitAsync();
-            return Ok(new { pedidoId = pedido.Id, total });
+            return Ok(new { pedidoId = pedido.Id, total, pagado = suma, cambio = canje!.Cambio ?? [], canje.CambioEnCuenta });
         }
         catch (HttpRequestException)
         {

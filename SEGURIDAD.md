@@ -82,7 +82,7 @@ sequenceDiagram
     Red->>Tienda: {llaveCifrada, nonce, datos}
     Tienda->>Tienda: k = RSA-OAEP(privada tienda, llaveCifrada)
     Tienda->>Tienda: pedido = AES-GCM-descifrar(k, nonce, datos)
-    Tienda->>Tienda: verifica firmas, suma exacta, stock
+    Tienda->>Tienda: verifica firmas, suma ≥ total, stock
 ```
 
 Si el paquete se altera en el camino, el tag de GCM no coincide y la tienda responde 400.

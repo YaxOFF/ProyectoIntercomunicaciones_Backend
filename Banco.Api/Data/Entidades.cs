@@ -25,7 +25,7 @@ public class Bono
     public string Firma { get; set; } = "";
 }
 
-public enum TipoMovimiento { COMPRA_BONOS, DEPOSITO_INICIAL }
+public enum TipoMovimiento { COMPRA_BONOS, DEPOSITO_INICIAL, CAMBIO }
 
 public class Movimiento
 {

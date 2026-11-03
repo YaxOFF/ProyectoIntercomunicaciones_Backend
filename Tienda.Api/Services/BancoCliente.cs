@@ -6,7 +6,7 @@ using System.Text;
 namespace Tienda.Api.Services;
 
 public record BonoFirmado(Guid Serie, int Denominacion, DateTime EmitidoEn, string Firma);
-public record RespuestaCanje(List<BonoFirmado>? Canjeados, int Total);
+public record RespuestaCanje(List<BonoFirmado>? Canjeados, int Total, List<BonoFirmado>? Cambio, int CambioEnCuenta);
 
 /// Cliente HTTP tienda → banco: llave pública de firma (cacheada) y canje con `X-Api-Key`.
 public class BancoCliente(HttpClient http, IConfiguration config)
@@ -34,9 +34,9 @@ public class BancoCliente(HttpClient http, IConfiguration config)
         catch (FormatException) { return false; }
     }
 
-    public async Task<(HttpStatusCode status, RespuestaCanje? respuesta)> Canjear(IEnumerable<Guid> series)
+    public async Task<(HttpStatusCode status, RespuestaCanje? respuesta)> Canjear(IEnumerable<Guid> series, int cobro)
     {
-        var req = new HttpRequestMessage(HttpMethod.Post, "bonos/canjear") { Content = JsonContent.Create(new { series }) };
+        var req = new HttpRequestMessage(HttpMethod.Post, "bonos/canjear") { Content = JsonContent.Create(new { series, cobro }) };
         req.Headers.Add("X-Api-Key", config["Seguridad:ApiKeyTienda"] ?? throw new InvalidOperationException("Falta Seguridad:ApiKeyTienda"));
         var r = await http.SendAsync(req);
         return (r.StatusCode, r.IsSuccessStatusCode ? await r.Content.ReadFromJsonAsync<RespuestaCanje>() : null);

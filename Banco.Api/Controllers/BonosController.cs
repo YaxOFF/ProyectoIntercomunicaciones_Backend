@@ -9,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Banco.Api.Controllers;
 
 public record BonoFirmadoDto(Guid Serie, int Denominacion, DateTime EmitidoEn, string Firma);
-public record CanjearDto(List<Guid>? Series);
+/// Cobro: monto a cobrar. Si los bonos suman más, el excedente vuelve como cambio. Null = sin cambio.
+public record CanjearDto(List<Guid>? Series, int? Cobro);
 
 [ApiController]
 public class BonosController(BancoDbContext db, FirmaBonos firma, IConfiguration config) : ControllerBase
@@ -20,6 +21,34 @@ public class BonosController(BancoDbContext db, FirmaBonos firma, IConfiguration
     private int UsuarioId => int.Parse(User.FindFirst("sub")!.Value);
 
     private static BonoFirmadoDto Dto(Bono b) => new(b.Serie, b.Denominacion, b.EmitidoEn, b.Firma);
+
+    /// Crea, firma y agrega (sin guardar) bonos nuevos para el usuario.
+    private List<Bono> Emitir(int usuarioId, IEnumerable<int> denominaciones)
+    {
+        var ahora = DateTime.UtcNow;
+        ahora = new DateTime(ahora.Ticks - ahora.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc); // mensaje canónico sin fracciones
+        var bonos = denominaciones.Select(d => new Bono { Serie = Guid.NewGuid(), Denominacion = d, PropietarioId = usuarioId, EmitidoEn = ahora }).ToList();
+        foreach (var b in bonos) b.Firma = firma.Firmar(b);
+        db.Bonos.AddRange(bonos);
+        return bonos;
+    }
+
+    /// Cambio en la menor cantidad de bonos. Lo que no se puede formar con bonos ($10, $30) va al saldo.
+    public static (List<int> bonos, int resto) Desglosar(int monto)
+    {
+        if (monto <= 0) return ([], 0);
+        var previo = new int[monto + 1]; // denominación usada para llegar a s; 0 = inalcanzable
+        var cuenta = new int[monto + 1];
+        for (var s = 1; s <= monto; s++)
+            foreach (var d in Denominaciones)
+                if (d <= s && (s == d || previo[s - d] != 0) && (previo[s] == 0 || cuenta[s - d] + 1 < cuenta[s]))
+                    (previo[s], cuenta[s]) = (d, cuenta[s - d] + 1);
+        var alcanzable = monto;
+        while (alcanzable > 0 && previo[alcanzable] == 0) alcanzable--;
+        var bonos = new List<int>();
+        for (var s = alcanzable; s > 0; s -= previo[s]) bonos.Add(previo[s]);
+        return (bonos, monto - alcanzable);
+    }
 
     [HttpGet("llave-publica")]
     public ContentResult LlavePublica() => Content(firma.LlavePublicaPem(), "application/x-pem-file");
@@ -49,12 +78,7 @@ public class BonosController(BancoDbContext db, FirmaBonos firma, IConfiguration
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.Saldo, u => u.Saldo - total));
         if (afectados == 0) return BadRequest(new { error = "Saldo insuficiente" });
 
-        var ahora = DateTime.UtcNow;
-        ahora = new DateTime(ahora.Ticks - ahora.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc); // mensaje canónico sin fracciones
-        var bonos = cantidades.SelectMany(c => Enumerable.Range(0, c.cantidad).Select(_ =>
-            new Bono { Serie = Guid.NewGuid(), Denominacion = c.denominacion, PropietarioId = usuarioId, EmitidoEn = ahora })).ToList();
-        foreach (var b in bonos) b.Firma = firma.Firmar(b);
-        db.Bonos.AddRange(bonos);
+        var bonos = Emitir(usuarioId, cantidades.SelectMany(c => Enumerable.Repeat(c.denominacion, c.cantidad)));
         db.Movimientos.Add(new Movimiento
         {
             UsuarioId = usuarioId, Tipo = TipoMovimiento.COMPRA_BONOS, Monto = -total,
@@ -93,8 +117,26 @@ public class BonosController(BancoDbContext db, FirmaBonos firma, IConfiguration
         if (afectados != series.Count) // sin Commit: la transacción hace rollback al salir
             return Conflict(new { error = "Algún bono no existe o ya fue canjeado; no se canjeó ninguno" });
         var canjeados = await db.Bonos.AsNoTracking().Where(b => series.Contains(b.Serie))
-            .Select(b => new { b.Serie, b.Denominacion }).ToListAsync();
+            .Select(b => new { b.Serie, b.Denominacion, b.PropietarioId }).ToListAsync();
+        var total = canjeados.Sum(b => b.Denominacion);
+        if (dto.Cobro is < 0 || dto.Cobro > total)
+            return BadRequest(new { error = $"Los bonos suman ${total} y no cubren el cobro de ${dto.Cobro}" }); // rollback
+
+        // El cambio es del dueño del primer bono (en la app todos los bonos de un pago son del mismo usuario).
+        var duenoId = canjeados.First(b => b.Serie == series[0]).PropietarioId;
+        var (piezas, resto) = Desglosar(total - (dto.Cobro ?? total));
+        var cambio = Emitir(duenoId, piezas);
+        if (resto > 0)
+        {
+            await db.Usuarios.Where(u => u.Id == duenoId).ExecuteUpdateAsync(s => s.SetProperty(u => u.Saldo, u => u.Saldo + resto));
+            db.Movimientos.Add(new Movimiento { UsuarioId = duenoId, Tipo = TipoMovimiento.CAMBIO, Monto = resto, Detalle = "Cambio que no cabe en bonos" });
+        }
+        await db.SaveChangesAsync();
         await tx.CommitAsync();
-        return Ok(new { canjeados, total = canjeados.Sum(b => b.Denominacion) });
+        return Ok(new
+        {
+            canjeados = canjeados.Select(b => new { b.Serie, b.Denominacion }), total,
+            cambio = cambio.Select(Dto), cambioEnCuenta = resto,
+        });
     }
 }

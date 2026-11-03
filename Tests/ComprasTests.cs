@@ -110,14 +110,60 @@ public class ComprasTests(ComprasTests.Entorno e) : IClassFixture<ComprasTests.E
     }
 
     [Fact]
-    public async Task SumaDistinta_400_Y_PaqueteBasura_400()
+    public async Task SumaInsuficiente_400_Y_PaqueteBasura_400()
     {
         var (_, bonos) = await Bonos(new() { ["100"] = 1 });
         var r = await Pagar(bonos); // $100 para un total de $120
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Contains("exacto", await r.Content.ReadAsStringAsync());
+        Assert.Contains("no alcanza", await r.Content.ReadAsStringAsync());
 
         var basura = new { llaveCifrada = Convert.ToBase64String(new byte[256]), nonce = "AAAAAAAAAAAAAAAA", datos = "AAAAAAAAAAAAAAAAAAAAAA==" };
         Assert.Equal(HttpStatusCode.BadRequest, (await e.Tienda.CreateClient().PostAsJsonAsync("/compras", basura)).StatusCode);
+    }
+
+    [Fact]
+    public async Task PagoConExcedente_DevuelveCambioFirmado()
+    {
+        var (banco, bonos) = await Bonos(new() { ["500"] = 1 }); // $500 por $120 → cambio $380
+        var r = await Pagar(bonos);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var cuerpo = await r.Content.ReadFromJsonAsync<JsonElement>();
+        var cambio = cuerpo.GetProperty("cambio").Deserialize<List<BonoFirmadoDto>>(JsonSerializerOptions.Web)!;
+        Assert.Equal(380, cambio.Sum(b => b.Denominacion));
+        Assert.Equal(0, cuerpo.GetProperty("cambioEnCuenta").GetInt32());
+
+        var enBanco = (await banco.GetFromJsonAsync<List<BonoFirmadoDto>>("/bonos"))!;
+        Assert.Equal(cambio.Select(b => b.Serie).Order(), enBanco.Select(b => b.Serie).Order()); // el cambio es del comprador
+        using var llave = RSA.Create();
+        llave.ImportFromPem(await banco.GetStringAsync("/llave-publica"));
+        Assert.All(cambio, b => Assert.True(Banco.Api.Services.FirmaBonos.Verificar(llave, b.Serie, b.Denominacion, b.EmitidoEn, b.Firma)));
+    }
+
+    [Fact]
+    public async Task CambioQueNoCabeEnBonos_ElRestoVaAlSaldo()
+    {
+        var (banco, bonos) = await Bonos(new() { ["50"] = 3 }); // $150 por $120 → cambio $30 = bono $20 + $10 al saldo
+        var r = await Pagar(bonos);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var cuerpo = await r.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(20, cuerpo.GetProperty("cambio")[0].GetProperty("denominacion").GetInt32());
+        Assert.Equal(10, cuerpo.GetProperty("cambioEnCuenta").GetInt32());
+        var cuenta = await banco.GetFromJsonAsync<JsonElement>("/cuenta");
+        Assert.Equal(10_000m - 150 + 10, cuenta.GetProperty("saldo").GetDecimal());
+    }
+
+    [Theory]
+    [InlineData(380, 5, 0)] // 300 + 4 x 20
+    [InlineData(60, 3, 0)]
+    [InlineData(90, 3, 0)] // 50 + 20 + 20
+    [InlineData(30, 1, 10)] // $20 en bono + $10 al saldo
+    [InlineData(10, 0, 10)]
+    [InlineData(0, 0, 0)]
+    public void Desglosar_MenosBonos(int monto, int piezas, int resto)
+    {
+        var (bonos, r) = BonosController.Desglosar(monto);
+        Assert.Equal(resto, r);
+        Assert.Equal(monto - resto, bonos.Sum());
+        Assert.Equal(piezas, bonos.Count);
     }
 }

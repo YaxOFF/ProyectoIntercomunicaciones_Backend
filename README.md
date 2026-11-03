@@ -68,7 +68,7 @@ Las cuentas nuevas también nacen con $10,000 y una CLABE mock.
 | `POST /bonos/comprar` `{"500":1,"100":3}` | JWT | Descuenta saldo, emite y firma los bonos. |
 | `GET /bonos` | JWT | Bonos del usuario en estado `EMITIDO`. |
 | `GET /llave-publica` | — | PEM de la llave pública de firma. |
-| `POST /bonos/canjear` `{series:[...]}` | `X-Api-Key` | Solo para la tienda. Todo o nada; 409 si alguno ya fue gastado. |
+| `POST /bonos/canjear` `{series:[...], cobro?}` | `X-Api-Key` | Solo para la tienda. Todo o nada; 409 si alguno ya fue gastado. Si sobra dinero, emite el cambio en bonos nuevos firmados y abona al saldo lo que no se forma con bonos. |
 | `GET /health` | — | Estado de la BD. |
 
 **Tienda.Api (`:5002`)**
@@ -77,7 +77,7 @@ Las cuentas nuevas también nacen con $10,000 y una CLABE mock.
 |---|---|
 | `GET /productos`, `GET /productos/{id}` | Catálogo (precios múltiplos de $20). |
 | `GET /llave-publica` | PEM de la llave pública de cifrado de la tienda. |
-| `POST /compras` `{llaveCifrada,nonce,datos}` | Paquete cifrado híbrido. Verifica firmas, suma exacta, canjea en el banco, descuenta stock. `{pedidoId,total}`. |
+| `POST /compras` `{llaveCifrada,nonce,datos}` | Paquete cifrado híbrido. Verifica firmas y que los bonos cubran el total, canjea en el banco, descuenta stock. `{pedidoId,total,pagado,cambio,cambioEnCuenta}`. |
 | `GET /pedidos?email=` | Historial de pedidos de un comprador. |
 | `GET /health` | Estado de la BD. |
 

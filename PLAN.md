@@ -24,7 +24,7 @@ Solo **mock data** (semillas). Dos repos:
 | Seguridad (las 3) | Ver sección **Diseño de seguridad**: firma digital RSA de bonos, pago cifrado híbrido RSA-OAEP + AES-GCM, AES para wallet en el celular y dato sensible en BD. |
 | Llaves | RSA 2048 generadas al primer arranque en `keys/` (gitignored, volumen en Docker). Banco: llave de firma. Tienda: llave de cifrado. Las públicas se exponen por `GET /llave-publica` (PEM). |
 | Canje banco↔tienda | Server-to-server: `POST /bonos/canjear` en el banco con header `X-Api-Key` (secreto compartido en `.env`). Evita doble gasto. |
-| Pago exacto | La compra exige que la suma de bonos sea **exactamente** el total (sin cambio). La app sugiere la combinación; si no existe, pide comprar bonos de $20. |
+| Pago y cambio | ~~Pago exacto~~ (cambiado 2026-11-03, Fase 10). Los bonos deben **cubrir** el total. El banco devuelve el excedente como **bonos nuevos firmados** para el dueño del primer bono, con la menor cantidad posible de bonos. Lo que no se puede formar con bonos ($10) se abona al saldo con un movimiento `CAMBIO`. La app elige la suma más chica que cubre el total y, si hay empate, la de menos bonos. |
 | App | Flutter en **emulador Android**. Base URLs `http://10.0.2.2:5001` (banco) y `http://10.0.2.2:5002` (tienda), en un solo archivo de config. HTTP en local (se documenta que en producción sería HTTPS/TLS). |
 | Commits | Conventional Commits, **sin firma de Claude** (sin `Co-Authored-By`, sin "Generated with Claude Code"). |
 
@@ -33,7 +33,7 @@ Solo **mock data** (semillas). Dos repos:
 **BD `banco`**
 - `Usuario`: `Id, Nombre, Email (único), PasswordHash, Saldo (decimal), ClabeCifrada (AES-GCM, base64), CreadoEn`.
 - `Bono`: `Serie (Guid, PK), Denominacion (500|300|100|50|20), PropietarioId, EmitidoEn, Estado (EMITIDO|CANJEADO), CanjeadoEn?, Firma (base64)`.
-- `Movimiento`: `Id, UsuarioId, Tipo (COMPRA_BONOS|DEPOSITO_INICIAL), Monto, Fecha, Detalle`.
+- `Movimiento`: `Id, UsuarioId, Tipo (COMPRA_BONOS|DEPOSITO_INICIAL|CAMBIO), Monto, Fecha, Detalle`.
 
 **BD `tienda`**
 - `Producto`: `Id, Nombre, Descripcion, Precio (múltiplo de 20), ImagenUrl?, Existencia`.
@@ -60,12 +60,12 @@ Mensaje firmado = texto canónico `serie|denominacion|emitidoEn` en UTF-8, **RSA
 - `POST /bonos/comprar` (JWT) `{ "500": 1, "100": 3 }` → descuenta saldo, emite y firma bonos, devuelve la lista.
 - `GET /bonos` (JWT) → bonos del usuario (EMITIDO).
 - `GET /llave-publica` → PEM de la llave de firma.
-- `POST /bonos/canjear` (`X-Api-Key`) `{series:[...]}` → en una transacción: todos EMITIDO → CANJEADO; si alguno no existe o ya fue canjeado → 409 y no cambia nada.
+- `POST /bonos/canjear` (`X-Api-Key`) `{series:[...], cobro?}` → en una transacción: todos EMITIDO → CANJEADO; si alguno no existe o ya fue canjeado → 409 y no cambia nada. Con `cobro`: 400 si no alcanza; si sobra, emite el cambio → `{canjeados,total,cambio:[bonos firmados],cambioEnCuenta}`.
 
 **Tienda.Api :5002**
 - `GET /productos`, `GET /productos/{id}`.
 - `GET /llave-publica` → PEM de la llave de cifrado de la tienda.
-- `POST /compras` (paquete cifrado) → descifra, valida stock, **verifica firma de cada bono** con la llave pública del banco, valida suma exacta, llama a `canjear` en el banco, descuenta stock, guarda pedido → `{pedidoId,total}`.
+- `POST /compras` (paquete cifrado) → descifra, valida stock, **verifica firma de cada bono** con la llave pública del banco, valida que la suma cubra el total, llama a `canjear` con `cobro` = total, descuenta stock, guarda pedido → `{pedidoId,total,pagado,cambio,cambioEnCuenta}`.
 - `GET /pedidos?email=` → historial.
 
 ## Diseño de seguridad (lo que se presenta en clase)
@@ -138,6 +138,9 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - README del frontend, guion de demo (incluye "ataques": bono alterado y doble gasto rechazados), capturas en `docs/`.
 - (opcional) Pantalla "Seguridad" en la app que muestre el paquete cifrado enviado, para la exposición.
 
+### Fase 10 — Pago con cambio (ambos repos) ✅
+Pedido del usuario después de probar la app: pagar sin tener el monto exacto. Ver la decisión **Pago y cambio**.
+
 ## Protocolo por sesión
 
 1. Leer **Avance** y tomar la primera fase sin marcar. Leer solo los archivos que esa fase toca.
@@ -159,6 +162,7 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - [x] Fase 7 — App: comprar bonos y wallet cifrado
 - [x] Fase 8 — App: tienda y pago cifrado
 - [x] Fase 9 — Pulido y demo
+- [x] Fase 10 — Pago con cambio
 
 ## Bitácora
 
@@ -172,3 +176,4 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - **2026-11-03 · Fase 7** — Cripto: `pointycastle` 4 + `basic_utils` 5.8 (PEM SPKI → `RSAPublicKey`), todo en `lib/cripto.dart`: `verificarBono` (PSSSigner SHA-256, salt 32) y `LlaveWallet` (PBKDF2-HMAC-SHA256 100k iteraciones → AES-256-GCM, guardado `base64(salt16|nonce12|cifrado|tag16)`; PIN incorrecto = falla el tag). `lib/wallet.dart`: wallet por usuario en `flutter_secure_storage` (`wallet_<email>`), PBKDF2 en otro isolate (`compute`), `agregar` sin duplicar series y `reemplazar` (botón sincronizar con `GET /bonos`). Pantallas `wallet.dart` (crear PIN 4-8 dígitos con confirmación / abrir, lista con chip "Firma válida" verificada en la app) y `comprar_bonos.dart` (contadores, máx 100, confirmación). `flutter test` con fixture real del banco (`test/bono.json`, `test/banco.pem`): firma válida/alterada y PIN bueno/malo. Verificado en emulador: compra $720, saldo $9,280, reabrir app → PIN 9999 rechazado, 1234 abre con 4 bonos válidos. Fase 8: el checkout necesita el `Wallet` abierto (usar el de `WalletPantalla`) y quitar los bonos gastados con `reemplazar`/filtro.
 - **2026-11-03 · Fase 8** — `lib/cripto.dart`: `cifrarPaquete` (llave AES-256 y nonce de un solo uso, AES-GCM del JSON `{email,items,bonos}`, llave con `OAEPEncoding.withSHA256` — MGF1 también SHA-256, compatible con `OaepSHA256` de .NET) y `elegirBonos` (subset-sum DP, prefiere menos bonos). `api.dart`: endpoints de tienda **sin JWT** (`auth: false`, el 401 solo cierra sesión en llamadas al banco), llave de la tienda cacheada. `pantallas/tienda.dart`: catálogo con +/- (tope = existencia), checkout con confirmación de bonos, quita los gastados del wallet, recarga existencias; botón "Reenviar el último paquete" (demo de repetición/doble gasto); `PedidosPantalla`. Se entra desde el wallet abierto (ícono tienda). Test de `elegirBonos`. Verificado en emulador: $60 sin combinación → aviso; taza $120 = $100+$20 → pedido #7, wallet $720→$600, existencia 29→28; reenviar → 409 "Algún bono ya fue gastado; no se cobró nada"; historial OK.
 - **2026-11-03 · Fase 9** — Frontend: `README.md` (correr, pantallas, tabla de cripto por archivo), `docs/GUION-DEMO.md` (guion de 10-12 min con los 2 ataques y el `psql` para ver la CLABE cifrada) y 8 capturas del emulador en `docs/`. Nuevo botón en la tienda **"Pagar con un bono alterado (prueba de firma)"**: sube a $500 la denominación de un bono con su firma original → 400 "Firma inválida en el bono …", wallet intacto. Backend: `README.md` enlaza al guion. La pantalla opcional "Seguridad" no se hizo (el guion y los diálogos ya explican el paquete). Verificado en emulador: ataque de firma rechazado, pedido #8 pagado ($600), reenvío → 409; `flutter analyze` limpio, `flutter test` 3/3. Plan completo.
+- **2026-11-03 · Fase 10** — Pago con cambio, pedido por el usuario. Banco: `CanjearDto.Cobro` y `BonosController.Desglosar` (programación dinámica con el menor número de bonos; si no hay forma exacta, baja al monto alcanzable más cercano y el resto, $10, va al saldo como movimiento `CAMBIO`). Helper `Emitir` compartido con la compra. El enum se guarda como texto, así que no hizo falta migración. Tienda: 400 solo si los bonos no alcanzan; la respuesta incluye `cambio` y `cambioEnCuenta`. App: `elegirBonos` elige la suma más chica que cubre el total, el diálogo muestra el cambio y el wallet agrega los bonos de cambio. Si se pierde la respuesta, el cambio se recupera con el botón **Sincronizar**. Verificado: `dotnet test` 16/16 (incluye $500 por $120 con cambio de $380 en bonos con firma válida, $150 por $120 con un bono de $20 + $10 al saldo, y la tabla de `Desglosar`); `flutter analyze` limpio; `flutter test` 3/3; imágenes Docker reconstruidas y APK instalado. La prueba manual en el emulador queda para el usuario, porque el wallet abierto pide su PIN.
