@@ -1,28 +1,67 @@
 name: intercom
 
+x-db: &db
+  image: postgres:17
+  environment: &dbenv
+    POSTGRES_USER: ${POSTGRES_USER:-postgres}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
 services:
   banco-db:
-    image: postgres:17
+    <<: *db
     environment:
+      <<: *dbenv
       POSTGRES_DB: banco
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "127.0.0.1:5471:5432"
     volumes:
       - banco-data:/var/lib/postgresql/data
 
   tienda-db:
-    image: postgres:17
+    <<: *db
     environment:
+      <<: *dbenv
       POSTGRES_DB: tienda
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "127.0.0.1:5472:5432"
     volumes:
       - tienda-data:/var/lib/postgresql/data
 
+  banco-api:
+    build: { context: ., dockerfile: Banco.Api/Dockerfile }
+    environment:
+      ConnectionStrings__Banco: Host=banco-db;Database=banco;Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      Seguridad__AesKey: ${Seguridad__AesKey:?Falta Seguridad__AesKey en .env}
+      Seguridad__JwtKey: ${Seguridad__JwtKey:?Falta Seguridad__JwtKey en .env}
+      Seguridad__ApiKeyTienda: ${Seguridad__ApiKeyTienda:?Falta Seguridad__ApiKeyTienda en .env}
+    ports:
+      - "127.0.0.1:${BANCO_PORT:-5001}:8080"
+    volumes:
+      - banco-keys:/app/keys
+    depends_on:
+      banco-db: { condition: service_healthy }
+
+  tienda-api:
+    build: { context: ., dockerfile: Tienda.Api/Dockerfile }
+    environment:
+      ConnectionStrings__Tienda: Host=tienda-db;Database=tienda;Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      Seguridad__ApiKeyTienda: ${Seguridad__ApiKeyTienda:?Falta Seguridad__ApiKeyTienda en .env}
+      Banco__Url: http://banco-api:8080/
+    ports:
+      - "127.0.0.1:${TIENDA_PORT:-5002}:8080"
+    volumes:
+      - tienda-keys:/app/keys
+    depends_on:
+      tienda-db: { condition: service_healthy }
+      banco-api: { condition: service_started }
+
 volumes:
   banco-data:
   tienda-data:
+  banco-keys:
+  tienda-keys:
