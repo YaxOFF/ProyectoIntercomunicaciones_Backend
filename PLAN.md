@@ -1,0 +1,165 @@
+# PLAN — Monedero digital de bonos (Banco + Tienda online + App Flutter)
+
+Proyecto escolar (materia de Intercomunicaciones / Redes). Un **Banco de bonos digitales** emite bonos de
+$500, $300, $100, $50 y $20; el usuario los compra con su saldo bancario (mock: $10,000), los guarda en un
+**monedero digital (wallet)** en la app móvil Flutter y los gasta en una **Tienda online** cuyos productos
+cuestan múltiplos de bonos. Además se debe **analizar, proponer e implementar seguridad** con los recursos
+vistos en clase: criptografía simétrica, criptografía asimétrica y firma digital.
+
+Solo **mock data** (semillas). Dos repos:
+
+- Backend (.NET): `D:\YaxonFolder\Github\ProyectoRedes\Backend` → `https://github.com/YaxOFF/ProyectoIntercomunicaciones_Backend.git`
+- Frontend (Flutter): `D:\YaxonFolder\Github\ProyectoRedes\Frontend` → `https://github.com/YaxOFF/ProyectoIntercomunicaciones_Frontend.git`
+
+**Este archivo es el plan maestro de los dos repos.** El Avance y la Bitácora viven solo aquí.
+
+## Decisiones tomadas
+
+| Tema | Decisión |
+|---|---|
+| Backend | Una solución `ProyectoIntercomunicaciones.sln` con **2 APIs**: `Banco.Api` (puerto 5001) y `Tienda.Api` (puerto 5002). Controllers + Services, .NET 10, EF Core. |
+| Bases de datos | **PostgreSQL en Docker**, 2 contenedores: `banco-db` (host 5433, BD `banco`) y `tienda-db` (host 5434, BD `tienda`). Migraciones EF + semilla automática al arrancar. |
+| Mock data | Usuarios demo con saldo $10,000; cuentas nuevas también nacen con $10,000. Catálogo de tienda sembrado con precios múltiplos de $20. |
+| Auth | Banco: registro/login con contraseña hasheada (PBKDF2 de `PasswordHasher`) y **JWT**. La tienda no tiene cuentas: el pedido guarda el email del comprador. |
+| Seguridad (las 3) | Ver sección **Diseño de seguridad**: firma digital RSA de bonos, pago cifrado híbrido RSA-OAEP + AES-GCM, AES para wallet en el celular y dato sensible en BD. |
+| Llaves | RSA 2048 generadas al primer arranque en `keys/` (gitignored, volumen en Docker). Banco: llave de firma. Tienda: llave de cifrado. Las públicas se exponen por `GET /llave-publica` (PEM). |
+| Canje banco↔tienda | Server-to-server: `POST /bonos/canjear` en el banco con header `X-Api-Key` (secreto compartido en `.env`). Evita doble gasto. |
+| Pago exacto | La compra exige que la suma de bonos sea **exactamente** el total (sin cambio). La app sugiere la combinación; si no existe, pide comprar bonos de $20. |
+| App | Flutter en **emulador Android**. Base URLs `http://10.0.2.2:5001` (banco) y `http://10.0.2.2:5002` (tienda), en un solo archivo de config. HTTP en local (se documenta que en producción sería HTTPS/TLS). |
+| Commits | Conventional Commits, **sin firma de Claude** (sin `Co-Authored-By`, sin "Generated with Claude Code"). |
+
+## Modelo de datos (destino)
+
+**BD `banco`**
+- `Usuario`: `Id, Nombre, Email (único), PasswordHash, Saldo (decimal), ClabeCifrada (AES-GCM, base64), CreadoEn`.
+- `Bono`: `Serie (Guid, PK), Denominacion (500|300|100|50|20), PropietarioId, EmitidoEn, Estado (EMITIDO|CANJEADO), CanjeadoEn?, Firma (base64)`.
+- `Movimiento`: `Id, UsuarioId, Tipo (COMPRA_BONOS|DEPOSITO_INICIAL), Monto, Fecha, Detalle`.
+
+**BD `tienda`**
+- `Producto`: `Id, Nombre, Descripcion, Precio (múltiplo de 20), ImagenUrl?, Existencia`.
+- `Pedido`: `Id, CompradorEmail, Fecha, Total, Estado (PAGADO)`, partidas `PedidoItem(ProductoId, Cantidad, PrecioUnitario)`, y `BonosUsados` (series).
+
+**Bono firmado (formato que todos respetan)**
+```json
+{ "serie": "guid", "denominacion": 100, "emitidoEn": "2026-11-03T12:00:00Z", "firma": "base64" }
+```
+Mensaje firmado = texto canónico `serie|denominacion|emitidoEn(ISO-8601 UTC)` en UTF-8, **RSA-PSS + SHA-256**.
+
+**Paquete de pago cifrado (app → tienda)**
+```json
+{ "llaveCifrada": "base64 RSA-OAEP-SHA256(llave AES 256)", "nonce": "base64 12 bytes", "datos": "base64 AES-GCM(json)+tag" }
+```
+`json` interno: `{ "email": "...", "items": [{ "productoId": 1, "cantidad": 2 }], "bonos": [ <bonos firmados> ] }`.
+
+## Endpoints (destino)
+
+**Banco.Api :5001**
+- `POST /auth/registro` `{nombre,email,password}` → crea usuario con $10,000 y CLABE mock cifrada.
+- `POST /auth/login` `{email,password}` → `{token}`.
+- `GET /cuenta` (JWT) → `{nombre,email,saldo,clabe (descifrada, enmascarada)}`; `GET /cuenta/movimientos`.
+- `POST /bonos/comprar` (JWT) `{ "500": 1, "100": 3 }` → descuenta saldo, emite y firma bonos, devuelve la lista.
+- `GET /bonos` (JWT) → bonos del usuario (EMITIDO).
+- `GET /llave-publica` → PEM de la llave de firma.
+- `POST /bonos/canjear` (`X-Api-Key`) `{series:[...]}` → en una transacción: todos EMITIDO → CANJEADO; si alguno no existe o ya fue canjeado → 409 y no cambia nada.
+
+**Tienda.Api :5002**
+- `GET /productos`, `GET /productos/{id}`.
+- `GET /llave-publica` → PEM de la llave de cifrado de la tienda.
+- `POST /compras` (paquete cifrado) → descifra, valida stock, **verifica firma de cada bono** con la llave pública del banco, valida suma exacta, llama a `canjear` en el banco, descuenta stock, guarda pedido → `{pedidoId,total}`.
+- `GET /pedidos?email=` → historial.
+
+## Diseño de seguridad (lo que se presenta en clase)
+
+| Amenaza | Técnica | Dónde |
+|---|---|---|
+| Falsificar o alterar un bono (cambiar $20 por $500) | **Firma digital** RSA-PSS/SHA-256: el banco firma, tienda y app verifican con la llave pública del banco. | `Banco.Api` firma, `Tienda.Api` y app verifican |
+| Espiar el pago en la red (robar bonos en tránsito) | **Asimétrica + simétrica (esquema híbrido)**: la app cifra el pedido con AES-256-GCM y cifra esa llave con RSA-OAEP de la tienda. Solo la tienda descifra. | App → `Tienda.Api /compras` |
+| Robo del celular / lectura del almacenamiento | **Simétrica** AES-256-GCM: el wallet se guarda cifrado con llave derivada de un PIN (PBKDF2). | App |
+| Fuga de la BD del banco | **Simétrica** AES-GCM para la CLABE; contraseñas con hash PBKDF2 (no se cifran, se hashean). | `Banco.Api` |
+| Gastar el mismo bono dos veces | Registro de canje transaccional en el banco (estado CANJEADO). | `Banco.Api /bonos/canjear` |
+| Suplantar a la tienda ante el banco | `X-Api-Key` server-to-server. | Tienda → Banco |
+| Sesiones | JWT con expiración. | Banco |
+
+Fuera de alcance (se menciona como propuesta, no se implementa): TLS/HTTPS con certificados, HSM para llaves, rotación de llaves.
+
+## Fases
+
+Una fase por sesión. Cada fase deja todo funcionando. Fases 1-5 en `Backend`, 6-9 en `Frontend`.
+
+### Fase 0 — Planear ✅
+Clonar los dos repos vacíos, este `PLAN.md`, `CLAUDE.md` en ambos repos y en la carpeta padre.
+
+### Fase 1 — Solución, Docker y BDs con semilla (Backend)
+Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
+- `ProyectoIntercomunicaciones.sln`, `Banco.Api/`, `Tienda.Api/` (`dotnet new webapi --use-controllers`), `.gitignore` (.NET + `keys/`), `.env.example`.
+- `docker-compose.yml` con `banco-db` y `tienda-db` (postgres:17, volúmenes, puertos 5433/5434).
+- EF Core + Npgsql en ambas: `BancoDbContext`, `TiendaDbContext`, entidades del modelo, migración inicial, `Database.Migrate()` + semilla al arrancar (2 usuarios demo con $10,000; ~10 productos).
+- `GET /productos` en tienda; `GET /health` en ambas.
+- Verificar: `docker compose up -d banco-db tienda-db`, `dotnet run` en cada API, `curl` a `/productos` y `/health`.
+
+### Fase 2 — Banco: cuentas, JWT y AES en BD (Backend)
+- `AuthController` (registro/login), `PasswordHasher`, emisión de JWT; `CuentaController` (cuenta, movimientos).
+- `Services/CifradoAes.cs` (AES-GCM, llave de `.env`) para CLABE mock al registrar; se muestra enmascarada.
+- Verificar: archivo `Banco.Api/banco.http` con registro → login → cuenta; ver en Postgres que la CLABE está cifrada.
+
+### Fase 3 — Banco: bonos firmados y canje (Backend)
+- `Services/LlavesRsa.cs` (genera/carga `keys/banco-firma.pem`), `Services/FirmaBonos.cs` (RSA-PSS SHA-256, mensaje canónico).
+- `BonosController`: comprar (valida denominaciones y saldo, transacción, movimiento), listar, `llave-publica`, `canjear` con `X-Api-Key`.
+- Proyecto `Tests/` (xUnit): firma válida verifica; bono alterado no verifica; doble canje → 409.
+- Verificar: `dotnet test` + flujo en `banco.http`.
+
+### Fase 4 — Tienda: pago cifrado híbrido y compra (Backend)
+- `Services/LlavesRsa` de la tienda (`keys/tienda-cifrado.pem`), `Services/DescifradoHibrido.cs` (RSA-OAEP-SHA256 + AES-GCM).
+- `ComprasController`: descifrar → verificar firmas (llave pública del banco obtenida y cacheada por HTTP) → suma exacta → `canjear` → stock → pedido. `GET /pedidos?email=`.
+- Tests: paquete cifrado de prueba (cliente C# en el test) compra OK; bono alterado → 400; bono ya gastado → 409; suma distinta → 400.
+- Verificar: `dotnet test` y compra real con un bono emitido en la Fase 3.
+
+### Fase 5 — Stack completo en Docker y docs del backend (Backend)
+- `Dockerfile` por API, `docker-compose.yml` con las 4 piezas, volumen de `keys/`, todo por `.env`.
+- `README.md` (cómo levantar, endpoints, usuarios demo) y `SEGURIDAD.md` (análisis de amenazas + propuesta + qué se implementó, con los diagramas de flujo de firma y cifrado híbrido).
+- Verificar: `docker compose up --build` limpio y flujo completo comprar bonos → comprar en tienda con `.http`.
+
+### Fase 6 — App Flutter: base, login y registro (Frontend)
+- `flutter create` (paquete `proyecto_intercomunicaciones`, Android), `lib/config.dart` con URLs, cliente HTTP, guardado del JWT en `flutter_secure_storage`.
+- Pantallas: Login, Registro, Inicio (nombre, saldo, CLABE enmascarada, movimientos).
+- Verificar: `flutter analyze` sin errores y probar en emulador contra el backend.
+
+### Fase 7 — App: comprar bonos y wallet cifrado (Frontend)
+- Pantalla Comprar bonos (contador por denominación, total, confirma). Pantalla Wallet (bonos con ✓ "firma válida" verificada en la app con la llave pública del banco).
+- Wallet guardado cifrado con AES-GCM, llave derivada del PIN (PBKDF2); PIN se pide al abrir el wallet. Paquete cripto: `pointycastle` (+ `basic_utils` para PEM) — decidir y anotar en Bitácora.
+- Verificar: comprar bonos, cerrar y reabrir app, el wallet se descifra con el PIN y falla con PIN incorrecto.
+- Si no cabe: 7a comprar bonos + wallet en claro, 7b cifrado AES + verificación de firma.
+
+### Fase 8 — App: tienda y pago cifrado (Frontend)
+- Catálogo, carrito, checkout: elige la combinación exacta de bonos del wallet (subset-sum simple), arma el paquete híbrido (AES-GCM + RSA-OAEP con la llave de la tienda), envía, quita los bonos gastados del wallet. Historial de pedidos.
+- Verificar: compra completa en emulador; repetir con los mismos bonos → error de doble gasto mostrado bien.
+
+### Fase 9 — Pulido y demo (ambos repos)
+- README del frontend, guion de demo (incluye "ataques": bono alterado y doble gasto rechazados), capturas en `docs/`.
+- (opcional) Pantalla "Seguridad" en la app que muestre el paquete cifrado enviado, para la exposición.
+
+## Protocolo por sesión
+
+1. Leer **Avance** y tomar la primera fase sin marcar. Leer solo los archivos que esa fase toca.
+2. Implementar la fase completa, nada de fases siguientes.
+3. Verificar: backend → `docker compose up -d banco-db tienda-db`, `dotnet build`, `dotnet test` (desde Fase 3) y el flujo en los `.http`; frontend → `flutter analyze` y probar en el emulador Android con el backend corriendo.
+4. Marcar la fase en **Avance** y escribir 2-5 líneas en **Bitácora** (este archivo, repo Backend).
+5. Commit (Conventional Commits, **sin firma de Claude**) + `git push` en cada repo tocado.
+6. Avisar al usuario que puede hacer `/clear` y continuar con la siguiente fase.
+
+## Avance
+
+- [x] Fase 0 — Planear
+- [ ] Fase 1 — Solución, Docker y BDs con semilla
+- [ ] Fase 2 — Banco: cuentas, JWT y AES en BD
+- [ ] Fase 3 — Banco: bonos firmados y canje
+- [ ] Fase 4 — Tienda: pago cifrado híbrido y compra
+- [ ] Fase 5 — Stack completo en Docker y docs del backend
+- [ ] Fase 6 — App Flutter: base, login y registro
+- [ ] Fase 7 — App: comprar bonos y wallet cifrado
+- [ ] Fase 8 — App: tienda y pago cifrado
+- [ ] Fase 9 — Pulido y demo
+
+## Bitácora
+
+- **2026-11-03 · Fase 0** — Repos clonados (vacíos). Decidido: 2 APIs en 1 solución, Postgres en Docker (2 contenedores), las 3 técnicas de seguridad combinadas, app en emulador Android. Plan maestro aquí; Frontend apunta a este archivo. Toolchain: .NET 10.0.401, Docker 29.8, Flutter en `C:\dev\flutter`.
