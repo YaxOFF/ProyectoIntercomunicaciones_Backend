@@ -4,7 +4,8 @@ Backend del monedero digital de bonos: un **Banco** emite bonos firmados ($500, 
 usuario compra con su saldo, y una **Tienda online** los acepta como pago. App móvil (Flutter):
 [ProyectoIntercomunicaciones_Frontend](https://github.com/YaxOFF/ProyectoIntercomunicaciones_Frontend).
 
-Solo mock data (semillas). El análisis de seguridad está en [SEGURIDAD.md](SEGURIDAD.md).
+Solo mock data (semillas). El análisis de seguridad está en [SEGURIDAD.md](SEGURIDAD.md). Guion de la demo en clase:
+[GUION-DEMO.md](https://github.com/YaxOFF/ProyectoIntercomunicaciones_Frontend/blob/main/docs/GUION-DEMO.md).
 
 | Pieza | Qué es | Puerto en el host |
 |---|---|---|
