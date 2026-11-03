@@ -24,3 +24,25 @@ Authorization: Bearer {{login.response.body.token}}
 
 ### Sin token -> 401
 GET {{banco}}/cuenta
+
+### Llave pública de firma (PEM)
+GET {{banco}}/llave-publica
+
+### Comprar bonos ($800): descuenta saldo, emite y firma
+# @name compra
+POST {{banco}}/bonos/comprar
+Authorization: Bearer {{login.response.body.token}}
+Content-Type: application/json
+
+{ "500": 1, "100": 3 }
+
+### Mis bonos (EMITIDO)
+GET {{banco}}/bonos
+Authorization: Bearer {{login.response.body.token}}
+
+### Canjear (tienda -> banco). Repetir -> 409 doble gasto
+POST {{banco}}/bonos/canjear
+X-Api-Key: dev-api-key-tienda
+Content-Type: application/json
+
+{ "series": ["{{compra.response.body.$[0].serie}}"] }

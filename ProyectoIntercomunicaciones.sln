@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Banco.Api", "Banco.Api\Banc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tienda.Api", "Tienda.Api\Tienda.Api.csproj", "{36034D25-BEED-4176-8896-542A2B7128E1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tests", "Tests\Tests.csproj", "{FCABCBD4-0582-4FEE-92D9-E189444033CC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{36034D25-BEED-4176-8896-542A2B7128E1}.Release|x64.Build.0 = Release|Any CPU
 		{36034D25-BEED-4176-8896-542A2B7128E1}.Release|x86.ActiveCfg = Release|Any CPU
 		{36034D25-BEED-4176-8896-542A2B7128E1}.Release|x86.Build.0 = Release|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Debug|x64.Build.0 = Debug|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Debug|x86.Build.0 = Debug|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Release|x64.ActiveCfg = Release|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Release|x64.Build.0 = Release|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Release|x86.ActiveCfg = Release|Any CPU
+		{FCABCBD4-0582-4FEE-92D9-E189444033CC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

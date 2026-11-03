@@ -43,7 +43,7 @@ Solo **mock data** (semillas). Dos repos:
 ```json
 { "serie": "guid", "denominacion": 100, "emitidoEn": "2026-11-03T12:00:00Z", "firma": "base64" }
 ```
-Mensaje firmado = texto canónico `serie|denominacion|emitidoEn(ISO-8601 UTC)` en UTF-8, **RSA-PSS + SHA-256**.
+Mensaje firmado = texto canónico `serie|denominacion|emitidoEn` en UTF-8, **RSA-PSS + SHA-256** (salt = 32 bytes, largo del hash). `serie` en minúsculas con guiones; `emitidoEn` exactamente `yyyy-MM-ddTHH:mm:ssZ` (UTC, sin fracciones: el banco trunca a segundos). Ej: `29522387-40ec-4461-9c7f-e9abde06c340|500|2026-11-03T19:53:01Z`.
 
 **Paquete de pago cifrado (app → tienda)**
 ```json
@@ -102,7 +102,7 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - `Services/CifradoAes.cs` (AES-GCM, llave de `.env`) para CLABE mock al registrar; se muestra enmascarada.
 - Verificar: archivo `Banco.Api/banco.http` con registro → login → cuenta; ver en Postgres que la CLABE está cifrada.
 
-### Fase 3 — Banco: bonos firmados y canje (Backend)
+### Fase 3 — Banco: bonos firmados y canje (Backend) ✅
 - `Services/LlavesRsa.cs` (genera/carga `keys/banco-firma.pem`), `Services/FirmaBonos.cs` (RSA-PSS SHA-256, mensaje canónico).
 - `BonosController`: comprar (valida denominaciones y saldo, transacción, movimiento), listar, `llave-publica`, `canjear` con `X-Api-Key`.
 - Proyecto `Tests/` (xUnit): firma válida verifica; bono alterado no verifica; doble canje → 409.
@@ -152,7 +152,7 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - [x] Fase 0 — Planear
 - [x] Fase 1 — Solución, Docker y BDs con semilla
 - [x] Fase 2 — Banco: cuentas, JWT y AES en BD
-- [ ] Fase 3 — Banco: bonos firmados y canje
+- [x] Fase 3 — Banco: bonos firmados y canje
 - [ ] Fase 4 — Tienda: pago cifrado híbrido y compra
 - [ ] Fase 5 — Stack completo en Docker y docs del backend
 - [ ] Fase 6 — App Flutter: base, login y registro
@@ -165,3 +165,4 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - **2026-11-03 · Fase 0** — Repos clonados (vacíos). Decidido: 2 APIs en 1 solución, Postgres en Docker (2 contenedores), las 3 técnicas de seguridad combinadas, app en emulador Android. Plan maestro aquí; Frontend apunta a este archivo. Toolchain: .NET 10.0.401, Docker 29.8, Flutter en `C:\dev\flutter`.
 - **2026-11-03 · Fase 1** — Solución `.sln` con `Banco.Api` (:5001) y `Tienda.Api` (:5002), EF Core 10 + Npgsql, migración `Inicial` en `Data/Migrations` de cada API, `Migrate()` + semilla al arrancar. Usuarios demo `ana@demo.com` / `luis@demo.com`, contraseña `demo123`, $10,000 + movimiento DEPOSITO_INICIAL; 10 productos (CHECK en BD: precio múltiplo de 20). `GET /health` (prueba conexión a BD), `GET /productos`, `GET /productos/{id}`. **Puertos de BD cambiados a 5471/5472** (5433/5434 ya ocupados por otros proyectos en esta máquina); compose con `name: intercom`. Verificado con curl. Pendiente Fase 2: `ClabeCifrada` es nullable, los usuarios semilla aún no tienen CLABE.
 - **2026-11-03 · Fase 2** — `AuthController` (registro valida nombre/email/password>=6, email en minúsculas, 409 si existe; login 401 genérico), JWT HS256 2 h con claim `sub` (`MapInboundClaims=false`), `CuentaController` (`/cuenta`, `/cuenta/movimientos`). `Services/CifradoAes.cs`: AES-256-GCM, formato base64(nonce12|cifrado|tag16), CLABE mock `002180`+12 dígitos, se muestra `**************1234`. Llaves en config `Seguridad:AesKey` (32 bytes base64) y `Seguridad:JwtKey` (>=32 chars): valores dev en `appsettings.Development.json`, producción por env `Seguridad__*` (en `.env.example`). `Sembrar` asigna CLABE a usuarios sin ella. Enums se serializan como string. Verificado con curl (`banco.http`) y `psql`: CLABE guardada cifrada.
+- **2026-11-03 · Fase 3** — `Services/FirmaBonos.cs`: RSA 2048 en `keys/banco-firma.pem` (se crea al primer arranque, carpeta por `Seguridad:KeysDir`), RSA-PSS SHA-256, `emitidoEn` truncado a segundos y formato canónico fijado en el modelo de datos. `BonosController`: `GET /llave-publica` (SPKI PEM `BEGIN PUBLIC KEY`), `POST /bonos/comprar` (máx 100 bonos, descuento atómico `UPDATE ... WHERE Saldo >= total` + bonos + movimiento `COMPRA_BONOS` con monto **negativo** en una transacción), `GET /bonos`, `POST /bonos/canjear` (`X-Api-Key` = `Seguridad:ApiKeyTienda`, comparación en tiempo constante; UPDATE condicional todo-o-nada; 401/400/409; responde `{canjeados:[{serie,denominacion}], total}` para que la tienda confirme montos). Proyecto `Tests/` (xUnit + `WebApplicationFactory`, contra `banco-db` de Docker): 4 pruebas verdes (firma válida/alterada, compra y saldo, inválidos 400, doble canje 409 y todo-o-nada). Verificado también con curl. Fase 4: la tienda necesita `Seguridad:ApiKeyTienda` igual y verificar con `RSASignaturePadding.Pss`.

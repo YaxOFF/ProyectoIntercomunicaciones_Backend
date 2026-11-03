@@ -12,6 +12,7 @@ builder.Services.AddControllers().AddJsonOptions(o => o.JsonSerializerOptions.Co
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<BancoDbContext>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Banco")));
 builder.Services.AddSingleton<CifradoAes>();
+builder.Services.AddSingleton<FirmaBonos>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
 {
     o.MapInboundClaims = false;
