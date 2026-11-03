@@ -1,3 +1,4 @@
+using Banco.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,13 +33,18 @@ public class BancoDbContext(DbContextOptions<BancoDbContext> options) : DbContex
         });
     }
 
-    public void Sembrar()
+    public void Sembrar(CifradoAes aes)
     {
+        // Usuarios creados antes de la Fase 2 no tienen CLABE: se les asigna una.
+        foreach (var sinClabe in Usuarios.Where(u => u.ClabeCifrada == null).ToList())
+            sinClabe.ClabeCifrada = aes.Cifrar(CifradoAes.NuevaClabe());
+        SaveChanges();
+
         if (Usuarios.Any()) return;
         var hasher = new PasswordHasher<Usuario>();
         foreach (var (nombre, email) in new[] { ("Ana Demo", "ana@demo.com"), ("Luis Demo", "luis@demo.com") })
         {
-            var u = new Usuario { Nombre = nombre, Email = email, Saldo = SaldoInicial };
+            var u = new Usuario { Nombre = nombre, Email = email, Saldo = SaldoInicial, ClabeCifrada = aes.Cifrar(CifradoAes.NuevaClabe()) };
             u.PasswordHash = hasher.HashPassword(u, "demo123");
             Usuarios.Add(u);
             SaveChanges();

@@ -7,7 +7,7 @@ public class Usuario
     public required string Email { get; set; }
     public string PasswordHash { get; set; } = "";
     public decimal Saldo { get; set; }
-    public string? ClabeCifrada { get; set; } // AES-GCM base64 (Fase 2)
+    public string? ClabeCifrada { get; set; } // AES-256-GCM base64(nonce|cifrado|tag)
     public DateTime CreadoEn { get; set; } = DateTime.UtcNow;
 }
 

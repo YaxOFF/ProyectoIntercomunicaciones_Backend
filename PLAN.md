@@ -97,7 +97,7 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 - `GET /productos` en tienda; `GET /health` en ambas.
 - Verificar: `docker compose up -d banco-db tienda-db`, `dotnet run` en cada API, `curl` a `/productos` y `/health`.
 
-### Fase 2 — Banco: cuentas, JWT y AES en BD (Backend)
+### Fase 2 — Banco: cuentas, JWT y AES en BD (Backend) ✅
 - `AuthController` (registro/login), `PasswordHasher`, emisión de JWT; `CuentaController` (cuenta, movimientos).
 - `Services/CifradoAes.cs` (AES-GCM, llave de `.env`) para CLABE mock al registrar; se muestra enmascarada.
 - Verificar: archivo `Banco.Api/banco.http` con registro → login → cuenta; ver en Postgres que la CLABE está cifrada.
@@ -151,7 +151,7 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 
 - [x] Fase 0 — Planear
 - [x] Fase 1 — Solución, Docker y BDs con semilla
-- [ ] Fase 2 — Banco: cuentas, JWT y AES en BD
+- [x] Fase 2 — Banco: cuentas, JWT y AES en BD
 - [ ] Fase 3 — Banco: bonos firmados y canje
 - [ ] Fase 4 — Tienda: pago cifrado híbrido y compra
 - [ ] Fase 5 — Stack completo en Docker y docs del backend
@@ -164,3 +164,4 @@ Meta: las dos APIs arrancan contra sus dos Postgres y sirven datos mock.
 
 - **2026-11-03 · Fase 0** — Repos clonados (vacíos). Decidido: 2 APIs en 1 solución, Postgres en Docker (2 contenedores), las 3 técnicas de seguridad combinadas, app en emulador Android. Plan maestro aquí; Frontend apunta a este archivo. Toolchain: .NET 10.0.401, Docker 29.8, Flutter en `C:\dev\flutter`.
 - **2026-11-03 · Fase 1** — Solución `.sln` con `Banco.Api` (:5001) y `Tienda.Api` (:5002), EF Core 10 + Npgsql, migración `Inicial` en `Data/Migrations` de cada API, `Migrate()` + semilla al arrancar. Usuarios demo `ana@demo.com` / `luis@demo.com`, contraseña `demo123`, $10,000 + movimiento DEPOSITO_INICIAL; 10 productos (CHECK en BD: precio múltiplo de 20). `GET /health` (prueba conexión a BD), `GET /productos`, `GET /productos/{id}`. **Puertos de BD cambiados a 5471/5472** (5433/5434 ya ocupados por otros proyectos en esta máquina); compose con `name: intercom`. Verificado con curl. Pendiente Fase 2: `ClabeCifrada` es nullable, los usuarios semilla aún no tienen CLABE.
+- **2026-11-03 · Fase 2** — `AuthController` (registro valida nombre/email/password>=6, email en minúsculas, 409 si existe; login 401 genérico), JWT HS256 2 h con claim `sub` (`MapInboundClaims=false`), `CuentaController` (`/cuenta`, `/cuenta/movimientos`). `Services/CifradoAes.cs`: AES-256-GCM, formato base64(nonce12|cifrado|tag16), CLABE mock `002180`+12 dígitos, se muestra `**************1234`. Llaves en config `Seguridad:AesKey` (32 bytes base64) y `Seguridad:JwtKey` (>=32 chars): valores dev en `appsettings.Development.json`, producción por env `Seguridad__*` (en `.env.example`). `Sembrar` asigna CLABE a usuarios sin ella. Enums se serializan como string. Verificado con curl (`banco.http`) y `psql`: CLABE guardada cifrada.
